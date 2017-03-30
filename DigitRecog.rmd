@@ -1,0 +1,736 @@
+---
+title: "Digit Recognizer"
+author: "Facundo Calcagno"
+output:
+  html_notebook: 
+    highlight: kate
+    theme: cosmo
+    toc: yes
+    toc_depth: 1
+  html_document: default
+---
+
+#Introduction#
+
+This is a prototype of a Digit Recognizer using A specific Fourier Transform, a connected component transform, some Kpi's from each training image, principal component analysis and a feed forward Neural Nework with a hidden Layer.
+
+In the following chunks I'll describe step by step the process.
+
+  
+```{r datai, eval=FALSE, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+library(ggplot2)
+library(proto)
+library(readr)
+train <- data.frame(read_csv("data/train.csv"))
+```
+
+#Binarization of the input
+
+Each image in the dataset is a bunch of pixels joint together in a matrix, to be more especific, 28x28 pixels. As the trainging pictures are Black and White, each pixel is a number that goes from 0 to 255. In order to be able to work with the data we ned to binare the input, take those values and decide pixel by pixel if it is a 0 or a 1.   
+
+```{r input, message=FALSE, warning=FALSE, include=FALSE, cache=TRUE}
+#Visualization 
+set.seed(71)
+n1=nrow(train)
+data<-train
+par(mfrow=c(10,10),mar=c(0.1,0.1,0.1,0.1))
+datos<-list()
+original<-list()
+
+l=0
+for (k in 1:n1)
+{
+    l=l+1
+   row <- NULL
+    for (n in 2:785)
+        row[n-1] <- train[k,n-1]
+     matrix1 <- matrix(row,28,28,byrow=FALSE)
+     matrix2 <- matrix(rep(0,784),28,28)
+     matrix3 <- matrix(rep(0,784),28,28)
+   
+    for (i in 1:28)
+        for (j in 1:28)
+        {
+           matrix3[i,28-j+1]<-matrix1[i,j]
+          if (matrix1[i,j]>100) matrix2[i,28-j+1]<-1 
+        }
+         datos[[l]]<-matrix2
+         original[[l]]<-matrix3
+    
+
+}
+
+```
+
+In this two images we can see and example of how the binarization takes place.
+
+###Original Images###
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(5,10),mar=c(.1,.1,.1,.1))
+for (i in 1:50) {
+  image(original[[i]], axes=FALSE, col=grey.colors(10))
+}
+```
+###Binarized Images###
+```{r binare, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(5,10),mar=c(.1,.1,.1,.1))
+for (i in 1:50) {
+  image(datos[[i]], axes=FALSE, col=grey.colors(10))
+}
+```
+
+
+As we can see I had to choose a thredhold for every pixel to be a 1 or a 0. After several tryouts, the choosen number was 100 out of 255. This number gave me a good start to binarizate each image without a major information loss.
+
+#KPI Calculation#
+
+
+##Sums per row and per column##
+In these 2 kpi's we generate per image (hich as 28 pixels by 28 pixels), the sum of pixels per column and per row. As an Example we can see the sum of columns and rows for an example.
+In the axes we can see the sum of rows and the sum of columns, transformed into a vector of colors for better comprehension. 
+When the color is closer to the white, the sum for that specific column or row is bigger, when the color is darker, the sum  is lower.
+
+```{r sum, message=FALSE, warning=FALSE}
+
+##sum per column
+
+sum1<-matrix(rep(0,28),28)
+rows<-list()
+
+for (k in 1:n1)
+{
+  image<-datos[[k]]
+   for (i in 1:28)
+  {
+          sum1[i]<-0
+           for (j in 1:28)
+          {
+             sum1[i]<-sum1[i]+image[i,j]
+          
+          }
+   }
+  rows[[k]]<-sum1
+}
+
+##sum per Row
+
+sum1<-matrix(rep(0,28),28)
+columns<-list()
+
+for (k in 1:n1)
+{
+  image<-datos[[k]]
+   for (i in 1:28)
+  {
+          sum1[i]<-0
+           for (j in 1:28)
+          {
+             sum1[i]<-sum1[i]+image[j,i]
+          
+          }
+   }
+  columns[[k]]<-sum1
+}
+par(mfrow=c(2,2),mar=c(.1,.1,.5,.5))
+layout(matrix(c(1,2,3,4), 2, 2, byrow = TRUE),widths=c(1,6), heights=c(1,6))
+image(matrix(rep(0,2)),col=grey.colors(10))
+image(matrix(rows[[10]], ncol=1),col=grey.colors(10))
+image(matrix(columns[[10]], nrow=1),col=grey.colors(10))
+image(datos[[10]], axes=TRUE, col=grey.colors(10)) 
+
+
+```
+
+## Dual Images##
+In the following 2 KPI's we take each picture and we duplicate the first part of it, like making a mirror of it.
+This Kpi will help us identify characters which its first half is the same as the second half. For example, the 0 and the 8 in both directions or the 3 in the vertical mirror.
+
+As an example we see the original picture and the dual picture of a character 3.
+
+```{r Dual, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Generate dual image by row
+dual_row<-list()
+for (k in 1:n1)
+{
+  image<-datos[[k]]
+  dual_image<-image
+  for (i in 1:28) {
+    for (j in 1:14) {
+      dual_image[i,j]<-image[i,j]
+      dual_image[i,29-j]<-image[i,j]
+    }
+  }
+  dual_row[[k]]<-dual_image
+}
+
+dual_col<-list()
+for (k in 1:n1)
+{
+  image<-datos[[k]]
+  dual_image<-image
+  for (j in 1:28) {
+    for (i in 1:14) {
+      dual_image[i,j]<-image[i,j]
+      dual_image[29-i,j]<-image[i,j]
+    }
+  }
+  dual_col[[k]]<-dual_image
+}
+par(mfrow=c(1,3))
+image(datos[[8]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(dual_col[[8]], axes=FALSE, col=grey.colors(2))
+title(sub = "Column mirror", font.sub = 2 , col.sub = "black",cex.sub = 2)
+image(dual_row[[8]], axes=FALSE, col=grey.colors(2))
+title(sub = "Row mirror", font.sub = 2, col.sub = "black",cex.sub = 2)
+```
+
+With this KPI's we are ready now to generate the parameters for the Neural Network.
+
+
+#Parameters Generation#
+
+##1: H30##
+Sum of pixels at 30% character height as given by Sumcm as calculated using
+Equation 1, with c=0.3, m=42 and n=24.
+```{r H30, echo=FALSE, message=FALSE, warning=FALSE}
+H30<-list()
+a= round(28/3)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+columns[[k]][j]
+  }
+  H30[[k]]<-sum
+}
+par(mfrow=c(1,2))
+image(datos[[8]], axes=FALSE, col=grey.colors(2))
+#layout(matrix(c(1,2,3,4), 2, 2, byrow = TRUE),widths=c(1,1), heights=c(3,1))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+#image(matrix(rep(0,2)),col=grey.colors(10))
+image(datos[[8]][,1:a], axes=FALSE, col=grey.colors(2))
+title(sub = "Row sum H30", font.sub = 2 , col.sub = "black",cex.sub = 2)
+```
+For this image the Row sum H30 is `r H30[[8]]`.
+
+##2. H50##
+Sum of pixels at 50% character height as given by Sumc as calculated using
+Equation 1, with c=0.5, m=42 and n=24.
+```{r H50, echo=FALSE, message=FALSE, warning=FALSE}
+H50<-list()
+a= round(28/2)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+columns[[k]][j]
+  }
+  H50[[k]]<-sum
+}
+
+par(mfrow=c(1,2))
+image(datos[[20]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(datos[[20]][,1:a], axes=FALSE, col=grey.colors(2))
+title(sub = "Row sum H50", font.sub = 2 , col.sub = "black",cex.sub = 2)
+```
+For this image the Row sum H50 is `r H50[[8]]`.
+
+##3. H80##
+Sum of pixels at 80% character height as given by Sumcm as calculated using
+Equation 1, with c=0.8, m=42 and n=24.
+
+```{r H80, echo=FALSE, message=FALSE, warning=FALSE}
+H80<-list()
+a= round(28/1.25)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+columns[[k]][j]
+  }
+  H80[[k]]<-sum
+}
+par(mfrow=c(1,2))
+image(datos[[25]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(datos[[25]][,1:a], axes=FALSE, col=grey.colors(2))
+title(sub = "Row sum H80", font.sub = 2 , col.sub = "black",cex.sub = 2)
+
+```
+For this image the Row sum H80 is `r H80[[25]]`.
+
+##4. V30##
+Sum of pixels at 30% character width as given by Sumcn as calculated using
+Equation 2, with c=0.3, m=42 and n=24.
+```{r V30, echo=FALSE, message=FALSE, warning=FALSE}
+V30<-list()
+a= round(28/3)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+rows[[k]][j]
+  }
+  V30[[k]]<-sum
+}
+par(mfrow=c(1,2))
+image(datos[[25]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(datos[[25]][1:a,], axes=FALSE, col=grey.colors(2))
+title(sub = "Column sum V30", font.sub = 2 , col.sub = "black",cex.sub = 2)
+
+```
+For this image the column sum V80 is `r V30[[25]]`.
+
+##5. V50##
+Sum of pixels at 50% character width as given by Sumcn as calculated using
+Equation 2, with c=0.5, m=42 and n=24.
+```{r V50, echo=FALSE, message=FALSE, warning=FALSE}
+V50<-list()
+a= round(28/2)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+rows[[k]][j]
+  }
+  V50[[k]]<-sum
+}
+
+par(mfrow=c(1,2))
+image(datos[[35]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(datos[[35]][1:a,], axes=FALSE, col=grey.colors(2))
+title(sub = "Column sum V50", font.sub = 2 , col.sub = "black",cex.sub = 2)
+
+```
+For this image the column sum V50 is `r V50[[35]]`.
+
+##6. V80##
+: Sum of pixels at 80% character width as given by Sumcn as calculated using
+Equation 2, with c=0.8, m=42 and n=24. 
+```{r V80, echo=FALSE, message=FALSE, warning=FALSE}
+V80<-list()
+a= round(28/1.25)
+for (k in 1:n1)
+{
+  sum=0
+  for (j in 1:a)
+  {
+   sum=sum+rows[[k]][j]
+  }
+  V80[[k]]<-sum
+}
+
+par(mfrow=c(1,2))
+image(datos[[81]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(datos[[81]][1:a,], axes=FALSE, col=grey.colors(2))
+title(sub = "Column sum V80", font.sub = 2 , col.sub = "black",cex.sub = 2)
+
+```
+For this image the column sum V80 is `r V80[[81]]`.
+
+
+##7. Horizontal Similarity##
+Correlation between an input character sample ‘I’ with its horizontal mirror ‘X’. It should be noted that
+‘X’ is generated from ‘I’ where lower half of ‘X’ is same as that of ‘I’ and upper half of
+‘X’ is the mirror image of its lower half.
+```{r Hsym, echo=FALSE, message=FALSE, warning=FALSE}
+#We have to look for the correlation between the matrix datos and dual_row
+
+Hsym<-list()
+a= round(28/1.25)
+for (k in 1:n1)
+{
+  Hsym[[k]]<-cor(c(datos[[k]]), c(dual_row[[k]]))
+}
+a<-data.frame(datos=c(datos),dual=c(dual_row))
+
+par(mfrow=c(2,2))
+image(datos[[15]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(dual_row[[15]], axes=FALSE, col=grey.colors(2))
+title(sub = "Row mirror", font.sub = 2 , col.sub = "black",cex.sub = 2)
+image(datos[[21]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(dual_row[[21]], axes=FALSE, col=grey.colors(2))
+title(sub = "Row mirror", font.sub = 2 , col.sub = "black",cex.sub = 2)
+```
+For example, here we plot 2 binarized imageS and its correspondant mirrorS. For the image in the top the correlation is  `r round(Hsym[[15]],2)`  and for the image in the botton the correlation is `r round(Hsym[[21]],2)`.
+
+##8. Vertical Similarity##
+Correlation between an input character sample (I) and its Vertical mirror (X).  It should be noted that ‘X’ is generated from ‘I’ where left half of ‘X’ is same as that of ‘I’ and right half of ‘X’
+is the mirror image of its left half.
+
+```{r vsym, echo=FALSE, message=FALSE, warning=FALSE}
+#We have to look for the correlation between the matrix datos and dual_row
+Vsym<-list()
+for (k in 1:n1)
+{
+  Vsym[[k]]<-cor(c(datos[[k]]), c(dual_col[[k]]))
+}
+
+par(mfrow=c(2,2))
+image(datos[[5]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(dual_col[[5]], axes=FALSE, col=grey.colors(2))
+title(sub = "Row mirror", font.sub = 2 , col.sub = "black",cex.sub = 2)
+image(datos[[21]], axes=FALSE, col=grey.colors(2))
+title(sub = "Original", font.sub = 2, col.sub = "black",cex.sub = 2)
+image(dual_col[[21]], axes=FALSE, col=grey.colors(2))
+title(sub = "Row mirror", font.sub = 2 , col.sub = "black",cex.sub = 2)
+```
+For example, here we plot 2 binarized imageS and its correspondant mirrorS. For the image in the top the correlation is  `r round(Vsym[[5]],2)`  and for the image in the botton the correlation is `r round(Vsym[[21]],2)`.
+
+
+##9.Walsh-Hadamard transform##
+
+###WHT DataBase Generation###
+
+In order to be able to use the Walsh-Hadamard Transformation we need to compare each image with defailt number images. Because of this I created 10 default number images and generated the Walsh-Hadamard Transformation to each of them.
+
+
+```{r hm, echo=FALSE, message=FALSE, warning=FALSE}
+library(readbitmap)
+library(proto)
+library(readr)
+library(biclust)
+library(bmp)
+
+numeros<-list()
+rotate <- function(x) t(apply(x, 2, rev))
+for (k in 1:10) 
+{
+t=k-1
+numeros[[k]] <- rotate(abs(binarize(read.bmp(paste(paste('numbers/',t,sep = ""),'.bmp',sep = ""))[,,1],threshold=100)-1))
+}
+
+
+library(phangorn)
+hm<-list()
+
+hm[[1]]<-fhm(numeros[[1]])
+hm[[2]]<-fhm(numeros[[2]])
+hm[[3]]<-fhm(numeros[[3]])
+hm[[4]]<-fhm(numeros[[4]])
+hm[[5]]<-fhm(numeros[[5]])
+hm[[6]]<-fhm(numeros[[6]])
+hm[[7]]<-fhm(numeros[[7]])
+hm[[8]]<-fhm(numeros[[8]])
+hm[[9]]<-fhm(numeros[[9]])
+hm[[10]]<-fhm(numeros[[10]])
+
+par(mfrow=c(2,5) ,mar=c(.1,.1,.1,.1))
+for (k in 1:10) image(numeros[[k]], axes=FALSE, col=grey.colors(2))
+
+```
+
+###WHT Compare###
+I need to compare de correlation of the denoted image with the WHT DataBase.
+For example for a given image, I show the image and the 10 correlations to each of the default characters.
+
+```{r wht, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(phangorn)
+WHT0<-list()
+WHT1<-list()
+WHT2<-list()
+WHT3<-list()
+WHT4<-list()
+WHT5<-list()
+WHT6<-list()
+WHT7<-list()
+WHT8<-list()
+WHT9<-list()
+
+correl<-list()
+for (k in 1:n1)
+{
+hm_num<-fhm(datos[[k]])
+WHT0[[k]]<-cor(hm_num,hm[[1]])
+WHT1[[k]]<-cor(hm_num,hm[[2]])
+WHT2[[k]]<-cor(hm_num,hm[[3]])
+WHT3[[k]]<-cor(hm_num,hm[[4]])
+WHT4[[k]]<-cor(hm_num,hm[[5]])
+WHT5[[k]]<-cor(hm_num,hm[[6]])
+WHT6[[k]]<-cor(hm_num,hm[[7]])
+WHT7[[k]]<-cor(hm_num,hm[[8]])
+WHT8[[k]]<-cor(hm_num,hm[[9]])
+WHT9[[k]]<-cor(hm_num,hm[[10]])
+  }  
+
+
+ WHT0<-c(do.call("cbind",WHT0)) 
+ WHT1<-c(do.call("cbind",WHT1)) 
+ WHT2<-c(do.call("cbind",WHT2)) 
+ WHT3<-c(do.call("cbind",WHT3)) 
+ WHT4<-c(do.call("cbind",WHT4)) 
+ WHT5<-c(do.call("cbind",WHT5)) 
+ WHT6<-c(do.call("cbind",WHT6)) 
+ WHT7<-c(do.call("cbind",WHT7)) 
+ WHT8<-c(do.call("cbind",WHT8))
+ WHT9<-c(do.call("cbind",WHT9)) 
+ 
+par(mfrow=c(1,1),mar=c(.1,.1,.1,.1))
+image(datos[[2]], axes=FALSE, col=grey.colors(2))
+
+```
+For this image the correlation to each character is:
+
+```{r correlations, echo=FALSE, fig.height=30, message=FALSE, warning=FALSE}
+kable(data.frame(zero=round(WHT0[[2]],2),one=round(WHT1[[2]],2),two=round(WHT2[[2]],2),three=round(WHT3[[2]],2),four=round(WHT4[[2]],2),five=round(WHT5[[2]],2),six=round(WHT6[[2]],2),seven=round(WHT7[[2]],2),eight=round(WHT8[[2]],2),nine=round(WHT9[[2]],2)))
+```
+
+
+As we can see the WHT get a good approximation to the number we are looking for. In tihs case it puts the zero as a second choice, but very close to the first place, where the number 6 is. 
+
+
+##10. Connected Component Transform ##
+It gives a measure of the number of closed areas in a character. In an image, all the
+connected pixels are given same labels. Thus if there are two sets of such pixels, as in ‘8’,
+they would be labeled as ‘1’ and ‘2’. Thus the highest value of ‘label’ gives an idea of
+closed areas present in the character.
+
+We use the connected component transform (Rosenfeld and Pfalz, 1966) and we show its result for 10 numbers in little black letters in the top of each image.
+
+```{r CNCP, echo=FALSE, message=FALSE, warning=FALSE}
+library(spatstat)
+ 
+CNCP<-list()
+ 
+for (k in 1:n1)
+{
+  x2 <- im(datos[[k]], xcol=seq(1,length=28), yrow=seq(1,length=28))
+  X <- levelset(x2, 0.06)
+  #plot(X)
+  Z <- connected(X)
+  #plot(Z)
+  # number of components
+  nc <- length(levels(Z))
+  # plot with randomised colour map
+  #  plot(Z, col=hsv(h=sample(seq(0,1,length=nc), nc)))
+  CNCP[[k]]<-nc-1
+}
+
+sam<-sample(n1,50)
+par(mfrow=c(5,10),mar=c(.1,.1,1.4,.1))
+for (i in sam)
+{
+    image(datos[[i]], axes=FALSE, col=grey.colors(2))
+title(main = CNCP[[i]], font.main = 3 , col.main = "black")
+}
+
+```
+
+Which is actually the numbers of components inside the numbers.
+
+
+##11.Principal Component Analysis##
+
+We have 28x28 pixels per image. Most of them are 0 for each image. So we can say that most of them give us no information regarding which number weneed to predict. We will enhage a Principal Component Analysis to try to figure out which are the principal Components of the dataset that absorb the maximum variance. After this we will add this prdictors to the Nnet Input.
+```{r PCA1, message=FALSE, warning=FALSE, include=FALSE}
+library(caret)
+nzr <- nearZeroVar(train[,-1],saveMetrics=T,freqCut=10000/1,uniqueCut=1/7)
+#sum(nzr$zeroVar)
+
+#sum(nzr$nzv) #208 predictors with zero variance
+
+cutvar <- rownames(nzr[nzr$nzv==TRUE,])
+var <- setdiff(names(train),cutvar)
+training <- train[,var]
+
+label <- as.factor(training[[1]])
+training$label <- NULL
+training <- training/255
+covtrain <- cov(training)
+```
+We apply PCA to the coviariance matrix and check how many components should we keep.
+```{r PCA2, echo=FALSE, message=FALSE, warning=FALSE}
+train_pc <- prcomp(covtrain)
+varex <- train_pc$sdev^2/sum(train_pc$sdev^2)
+varcum <- cumsum(varex)
+result <- data.frame(num=1:length(train_pc$sdev),
+                         ex=varex,
+                         cum=varcum)
+
+plot(result$num,result$cum,type="b",xlim=c(0,100),
+     main="Variance Explained by Top 100 Components",
+     xlab="Number of Components",ylab="Variance Explained")
+abline(v=15,lty=2)
+```
+
+Acording to the plot we keep the first 15 components, which represent almost 90% of the variance, to fit the model. 
+
+```{r PCAFinal, echo=TRUE, message=FALSE, warning=FALSE}
+train_score <- as.matrix(training) %*% train_pc$rotation[,1:15]
+```
+
+#Final Data Set #
+Data: Dataset of all the calculated kpi's per photo. 
+
+We show the names of the variables of the Data set.
+
+```{r finaldata, echo=FALSE, message=FALSE, warning=FALSE}
+H30_m <- matrix(unlist(H30), nrow=n1)
+H50_m <- matrix(unlist(H50), nrow=n1)
+H80_m <- matrix(unlist(H80), nrow=n1)
+V30_m <- matrix(unlist(V30), nrow=n1)
+V50_m <- matrix(unlist(V50), nrow=n1)
+V80_m <- matrix(unlist(V80), nrow=n1)
+Hsym_m <- matrix(unlist(Hsym), nrow=n1)
+Vsym_m <- matrix(unlist(Vsym), nrow=n1)
+Vsym_m[is.na(Vsym_m)] <-0
+WHT0_m <- matrix(WHT0, nrow=n1)
+WHT1_m <- matrix(WHT1, nrow=n1)
+WHT2_m <- matrix(WHT2, nrow=n1)
+WHT3_m <- matrix(WHT3, nrow=n1)
+WHT4_m <- matrix(WHT4, nrow=n1)
+WHT5_m <- matrix(WHT5, nrow=n1)
+WHT6_m <- matrix(WHT6, nrow=n1)
+WHT7_m <- matrix(WHT7, nrow=n1)
+WHT8_m <- matrix(WHT8, nrow=n1)
+WHT9_m <- matrix(WHT9, nrow=n1) 
+CNCP_m <- matrix(unlist(CNCP), nrow=n1)
+PC1<-train_score[,1]
+PC2<-train_score[,2]
+PC3<-train_score[,3]
+PC4<-train_score[,4]
+PC5<-train_score[,5]
+PC6<-train_score[,6]
+PC7<-train_score[,7]
+PC8<-train_score[,8]
+PC9<-train_score[,9]
+PC10<-train_score[,10]
+PC11<-train_score[,11]
+PC12<-train_score[,12]
+PC13<-train_score[,13]
+PC14<-train_score[,14]
+PC15<-train_score[,15]
+
+label<-factor(data$label)
+
+#Normalize the inputs
+
+train_final<-data.frame(H30_m,H50_m,H80_m,V30_m,V50_m,V80_m,Hsym_m,Vsym_m,WHT0_m,WHT1_m,WHT2_m,WHT3_m,WHT4_m,WHT5_m,WHT6_m,WHT7_m,WHT8_m,WHT9_m,CNCP_m,PC1,PC2,PC3,PC4,PC5,PC6,PC7,PC8,PC9,PC10,PC11,PC12,PC13,PC14,PC15,label)
+
+colnames(train_final)
+
+```
+#Train and Test#
+
+In this step we scale all the variables and we center them so that there is no weight difference between them, so that all variables have the same initial importance. We also create train and test partitions of the data. 
+
+I show a couple of rows to see the final Data set in action.
+
+```{r train, echo=TRUE, message=FALSE, warning=FALSE}
+
+library(car)
+library(caret)
+
+preObj <- preProcess(x=train_final, method=c("center", "scale"))
+trainIndex <- createDataPartition(train_final$label, p=.7, list=F)
+
+numbers.traintotal<-predict(preObj,train_final)
+numbers.train<- predict(preObj, train_final[trainIndex, ])
+numbers.test     <- predict(preObj, train_final[-trainIndex, ])
+
+numbers.traintotal[1:5,]
+```
+
+#Neural Network#
+In this step we train the Neural network.
+
+For this specific training set, I've choosen a neural network with 1 hidden layer with 22 nodes.
+This election was done after testing the nnet with a several diferent numbers of nodes for the hidden layer. I've tried with 10 nodes, to 28 and the best accuracy for the model was obteined with 24 nodes.
+
+##Model Results:##
+
+```{r Model, echo=TRUE, message=FALSE, warning=FALSE}
+
+my.grid6 <- expand.grid(.decay = c(0.5), .size = c(22))
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+numbers.fit6 <- train(label ~ ., data = numbers.traintotal,method = "nnet", maxit = 1000, trContor=train_control,tuneGrid = my.grid6, trace = F, linout = 1) 
+
+#kable(numbers.fit6$results)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+numbers.fit6
+```
+
+#Test Set Predictions table#
+```{r predictions, eval=FALSE, warning=FALSE, include=FALSE}
+
+
+library(knitr)
+first<-predict(numbers.fit6,numbers.test)
+di<-table(first,numbers.test$label)
+accuracy<-sum(diag(di))/sum(nrow(numbers.test))
+```
+For the test set we have a __`r round(accuracy,4) *100`__ % prediction accuracy.
+
+Here we show the confusion matrix for the test set.
+```{r confusion, echo=FALSE, message=FALSE, warning=FALSE}
+
+colum <- c('0', '1', '2', '3', '4', '5', '6', '7', '8', '9' )
+ro <- c('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+df <- expand.grid(colum, ro)
+df$value <- c(table(first,numbers.test$label) )
+
+g <- ggplot(df, aes(Var1, Var2)) + geom_point(aes(size = value), colour = "grey") + theme_bw() + xlab("Predicted") + ylab("Original")
+g + scale_size_continuous(range=c(2,20)) + geom_text(aes(label = value))
+```
+
+##Good preditions##
+I'll like to show some images of good predictions:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+buenas<-numbers.test$label==first
+par(mfrow=c(5,10),mar=c(.1,.1,.1,.1))
+i=0
+j=0
+prediction<-NULL
+while (i<50)
+{
+  j<-j+1
+  if (numbers.traintotal[j,]$label==first[j]) {
+      image(original[[j]], axes=FALSE, col=grey.colors(10))
+      i<-i+1
+  };
+}
+
+```
+
+##Bad preditions##
+And also some pictures of bad predicted caracters with the predicted character in little black font.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(5,10),mar=c(.1,0,1.4,.1))
+i=0
+j=0
+prediction<-NULL
+
+#summary(numbers.test[1,]$label)
+while (i<50)
+{
+  j<-j+1
+  if (numbers.traintotal[j,]$label!=first[j]) {
+      image(original[[j]], axes=FALSE, col=grey.colors(10))
+      title(main = first[j], font.main = 3 , col.main = "black")
+      
+      i<-i+1
+  };
+}
+
+
+```
+As we can see in the previuos graph, the badly predicted characters are not easy to distinguish and even for a person its hard to recognize. 
